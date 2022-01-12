@@ -1,0 +1,128 @@
+getwd()
+setwd("C:/Users/DELL/Desktop")
+
+SurgeryA <- read.csv("surgery_data_A.csv")
+SurgeryB <- read.csv("surgery_data_B.csv")
+
+library(psych)
+library(tidyverse)
+library(cAIC4)
+library(r2glmm)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(ggplot2)
+library(naniar)
+
+stdCoef.merMod <- function(object) {	
+  sdy <- sd(getME(object,"y"))	
+  sdx <- apply(getME(object,"X"), 2, sd)	
+  sc <- fixef(object)*sdx/sdy	
+  se.fixef <- coef(summary(object))[,"Std. Error"]	
+  se <- se.fixef*sdx/sdy	
+  return(data.frame(stdcoef=sc, stdse=se))	
+  
+ #assign Hospital as a grouping factor
+
+SurgeryA = SurgeryA %>%
+  mutate (hospital = factor(hospital),
+          sex = factor(sex))
+SurgeryB = SurgeryB %>%
+  mutate (hospital = factor(hospital),
+          sex = factor(sex))
+         
+ #check missing data
+n_miss(SurgeryA)
+n_miss(SurgeryB)
+
+#Explore data 
+
+str(SurgeryA)
+summary(SurgeryA)
+str(SurgeryB)
+summary(SurgeryB)
+
+library(ggplot2)
+
+SurgeryA %>% 
+  ggplot() + aes(y = pain, x = age) + geom_point(aes(color = hospital),
+                                               size = 4) + geom_smooth(method = "lm", se = F)
+                                               
+ SurgeryA %>% 
+  ggplot() + aes(y = pain, x = sex) + geom_point(aes(color = hospital),
+                                               size = 4) + geom_smooth(method = "lm", se = F)
+
+#there is one participant that stated woman in sex so we will replace woman with female 
+
+SurgeryA$sex[SurgeryA$sex == "woman"] <- "female"
+
+SurgeryA %>% 
+  ggplot() + aes(y = pain, x = STAI_trait) + geom_point(aes(color = hospital),
+                                               size = 4) + geom_smooth(method = "lm", se = F)
+                                               
+  SurgeryA %>% 
+  ggplot() + aes(y = pain, x = pain_cat) + geom_point(aes(color = hospital),
+                                               size = 4) + geom_smooth(method = "lm", se = F)
+                                               
+ SurgeryA %>% 
+  ggplot() + aes(y = pain, x = cortisol_serum) + geom_point(aes(color = hospital),
+                                               size = 4) + geom_smooth(method = "lm", se = F)
+                                               
+  SurgeryA %>% 
+  ggplot() + aes(y = pain, x = mindfulness) + geom_point(aes(color = hospital),
+                                               size = 4) + geom_smooth(method = "lm", se = F)
+                                               
+#random intercept model (Surgery A)
+
+modelrandom_intA = lmer(pain ~ age + sex + STAI_trait + pain_cat + cortisol_serum + mindfulness + (1 | hospital), data = SurgeryA)
+
+summary(modelrandom_intA)
+
+#confidence intervals for the model coefficients
+
+confint(modelrandom_intA)
+stdCoef.merMod(modelrandom_intA)
+
+#Marignal R squared with confidence intervals 
+r2beta(modelrandom_intA)
+
+#Conditional R squared 
+r.squaredGLMM(modelrandom_intA)
+
+#Use dataA predict pain on dataB
+predictpainB <- predict(modelrandom_intA, newdata = SurgeryB, allow.new.levels = TRUE)
+print(predictpainB)
+
+#Calculate R squared of dataB 1-(RSS/TSS)
+RSS = sum((SurgeryB$pain - predictpainB)^2)
+mod_mean <- lm(pain ~1, data = SurgeryB)
+TSS = sum((SurgeryB$pain - predict(mod_mean))^2)
+R2 = 1 - (RSS/TSS)
+print(R2)
+TSS
+
+#New random intercept model
+newmodel_intA <- lmer(pain ~ cortisol_serum + (1 | hospital), data = SurgeryA )
+summary(newmodel_intA)
+
+#Random slope model - allow both random intercept and random slope 
+
+modelrandom_slpA <- lmer(pain ~ cortisol_serum + (cortisol_serum  | hospital), data = SurgeryA )
+summary(modelrandom_slpA)
+
+#NOTE: Singular fit 
+
+# Visualization 
+
+data_test_performance_slope = SurgeryA %>%
+  mutate(pred_int = predict(newmodel_intA), pred_slope = predict(modelrandom_slpA))
+
+
+#Regression line of the random intercept model
+
+data_test_performance_slope %>%
+  ggplot() + aes(y = pain, x = cortisol_serum, group = hospital) + geom_point(aes(color = hospital), size = 4) + geom_line(color = "red", aes(y = pred_int, x = cortisol_serum)) + facet_wrap(~ hospital, ncol = 2)
+
+#Regression line of the random slope model
+data_test_performance_slope %>%
+  ggplot() + aes(y = pain, x = cortisol_serum, group = hospital) + geom_point(aes(color = hospital), size = 4) + geom_line(color = "red", aes(y = pred_slope, x = cortisol_serum)) + facet_wrap(~ hospital, ncol = 2)
